@@ -8,6 +8,7 @@ import torchvision
 import torchvision.transforms as transforms
 
 import os
+import copy  #  deepcopy를 위해 필요함
 
 from models import *
 
@@ -82,20 +83,26 @@ def train(epoch):
         benign_outputs = net(inputs)
         loss = criterion(benign_outputs, targets)
         loss.backward()
-
         optimizer.step()
+
         train_loss += loss.item()
         _, predicted = benign_outputs.max(1)
-
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
-        
+
         if batch_idx % 10 == 0:
             print('\nCurrent batch:', str(batch_idx))
             print('Current benign train accuracy:', str(predicted.eq(targets).sum().item() / targets.size(0)))
             print('Current benign train loss:', loss.item())
 
-    print('\nTotal benign train accuarcy:', 100. * correct / total)
+        #  adversarial 학습 추가 예시 (선택적으로 주석 해제)
+        # adv_inputs = adversary.perturb(inputs, targets)
+        # adv_outputs = net(adv_inputs)
+        # adv_loss = criterion(adv_outputs, targets)
+        # adv_loss.backward()
+        # optimizer.step()
+
+    print('\nTotal benign train accuracy:', 100. * correct / total)  #  오타 수정: accuarcy → accuracy
     print('Total benign train loss:', train_loss)
 
 def test(epoch):
@@ -106,46 +113,51 @@ def test(epoch):
     benign_correct = 0
     adv_correct = 0
     total = 0
-    with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(test_loader):
-            inputs, targets = inputs.to(device), targets.to(device)
-            total += targets.size(0)
 
+    for batch_idx, (inputs, targets) in enumerate(test_loader):
+        inputs, targets = inputs.to(device), targets.to(device)
+        total += targets.size(0)
+
+        #  benign 테스트는 no_grad
+        with torch.no_grad():
             outputs = net(inputs)
             loss = criterion(outputs, targets)
             benign_loss += loss.item()
-
             _, predicted = outputs.max(1)
             benign_correct += predicted.eq(targets).sum().item()
 
-            if batch_idx % 10 == 0:
-                print('\nCurrent batch:', str(batch_idx))
-                print('Current benign test accuracy:', str(predicted.eq(targets).sum().item() / targets.size(0)))
-                print('Current benign test loss:', loss.item())
+        if batch_idx % 10 == 0:
+            print('\nCurrent batch:', str(batch_idx))
+            print('Current benign test accuracy:', str(predicted.eq(targets).sum().item() / targets.size(0)))
+            print('Current benign test loss:', loss.item())
 
-            adv = adversary.perturb(inputs, targets)
+        #  adversarial perturbation은 gradient 필요 → no_grad 밖
+        adv = adversary.perturb(inputs, targets)
+
+        with torch.no_grad():
             adv_outputs = net(adv)
             loss = criterion(adv_outputs, targets)
             adv_loss += loss.item()
-
             _, predicted = adv_outputs.max(1)
             adv_correct += predicted.eq(targets).sum().item()
 
-            if batch_idx % 10 == 0:
-                print('Current adversarial test accuracy:', str(predicted.eq(targets).sum().item() / targets.size(0)))
-                print('Current adversarial test loss:', loss.item())
+        if batch_idx % 10 == 0:
+            print('Current adversarial test accuracy:', str(predicted.eq(targets).sum().item() / targets.size(0)))
+            print('Current adversarial test loss:', loss.item())
 
-    print('\nTotal benign test accuarcy:', 100. * benign_correct / total)
-    print('Total adversarial test Accuarcy:', 100. * adv_correct / total)
+    print('\nTotal benign test accuracy:', 100. * benign_correct / total)
+    print('Total adversarial test accuracy:', 100. * adv_correct / total)
     print('Total benign test loss:', benign_loss)
     print('Total adversarial test loss:', adv_loss)
 
+    #  epoch별로 저장하도록 수정
     state = {
-        'net': net.state_dict()
+        'net': net.state_dict(),
+        'epoch': epoch
     }
     if not os.path.isdir('checkpoint'):
         os.mkdir('checkpoint')
-    torch.save(state, './checkpoint/' + file_name)
+    torch.save(state, f'./checkpoint/{file_name}_epoch{epoch}.pth')  #  파일명에 epoch 포함
     print('Model Saved!')
 
 def adjust_learning_rate(optimizer, epoch):
